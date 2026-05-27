@@ -1,5 +1,5 @@
 using Microsoft.Extensions.AI;
-using OllamaChat.Application.Models;
+using AIAgentChat.Application.Models;
 using OllamaSharp;
 using OpenAI;
 using System.ClientModel;

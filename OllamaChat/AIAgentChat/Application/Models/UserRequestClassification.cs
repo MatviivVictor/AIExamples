@@ -1,4 +1,4 @@
-namespace OllamaChat.Application.Models;
+namespace AIAgentChat.Application.Models;
 
 /// <summary>
 /// Represents a structured AI response for user request classification.

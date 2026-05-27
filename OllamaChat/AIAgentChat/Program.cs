@@ -4,7 +4,8 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using OllamaChat.Application.Models;
+using AIAgentChat.Application.Models;
+using AIAgentChat.Application.Services;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -30,6 +31,9 @@ var app = builder.Build();
 
 var chatClient = app.Services.GetRequiredService<IChatClient>();
 
+var manualPath = Path.Combine(AppContext.BaseDirectory, "Manuals", "user-guid.md");
+var knowledgeBase = new KnowledgeBaseService(manualPath);
+
 var chatHistory = new List<ChatMessage>();
 
 if (!string.IsNullOrWhiteSpace(aiOptions.SystemPrompt))
@@ -43,6 +47,7 @@ Console.WriteLine($"Provider: {aiOptions.Provider}");
 Console.WriteLine($"Model: {aiOptions.Model}");
 Console.WriteLine("Type your prompt and press Enter.");
 Console.WriteLine("Type 'classify' to run structured output example.");
+Console.WriteLine("Type 'docs' to ask a question using the local documentation.");
 Console.WriteLine("Type 'exit' to quit.");
 Console.WriteLine();
 
@@ -67,6 +72,13 @@ while (true)
     if (string.Equals(userPrompt, "classify", StringComparison.OrdinalIgnoreCase))
     {
         await ClassifyUserRequestAsync(chatClient);
+        Console.WriteLine();
+        continue;
+    }
+
+    if (string.Equals(userPrompt, "docs", StringComparison.OrdinalIgnoreCase))
+    {
+        await AnswerFromDocumentationAsync(chatClient, knowledgeBase);
         Console.WriteLine();
         continue;
     }
@@ -357,6 +369,141 @@ static bool TryParseClassification(
     {
         error = $"AI response is not valid JSON: {exception.Message}";
         return false;
+    }
+}
+
+// ... existing code ...
+
+static async Task AnswerFromDocumentationAsync(
+    IChatClient chatClient,
+    KnowledgeBaseService knowledgeBase)
+{
+    Console.WriteLine();
+    Console.WriteLine("Documentation RAG mode.");
+    Console.WriteLine("Ask a question about this project:");
+    var question = Console.ReadLine();
+
+    if (string.IsNullOrWhiteSpace(question))
+    {
+        Console.WriteLine("Question cannot be empty.");
+        return;
+    }
+
+    IReadOnlyList<KnowledgeChunk> chunks;
+
+    try
+    {
+        chunks = knowledgeBase.Search(question, maxResults: 3);
+    }
+    catch (FileNotFoundException exception)
+    {
+        Console.WriteLine();
+        Console.WriteLine("Knowledge base file was not found.");
+        Console.WriteLine(exception.Message);
+        return;
+    }
+
+    if (chunks.Count == 0)
+    {
+        Console.WriteLine();
+        Console.WriteLine("Cannot answer from documentation.");
+        Console.WriteLine("No relevant information was found in Manuals/user-guid.md.");
+        return;
+    }
+
+    PrintRetrievedChunks(chunks);
+
+    var ragPrompt = BuildRagPrompt(question, chunks);
+
+    var messages = new List<ChatMessage>
+    {
+        new(
+            ChatRole.System,
+            """
+            You are a documentation assistant for this console AI chat project.
+
+            Your task:
+            - read the provided documentation context;
+            - answer the user's question using that context;
+            - explain practical steps when the context contains them.
+
+            Refuse to answer only if the provided context is not related to the question.
+            """),
+        new(ChatRole.User, ragPrompt)
+    };
+
+    try
+    {
+        Console.WriteLine();
+        Console.WriteLine("Answer from documentation:");
+        Console.WriteLine();
+
+        await foreach (var item in chatClient.GetStreamingResponseAsync(messages))
+        {
+            Console.Write(item.Text);
+        }
+
+        Console.WriteLine();
+    }
+    catch (ClientResultException exception) when (exception.Status == 429)
+    {
+        Console.WriteLine();
+        Console.WriteLine("AI provider returned HTTP 429.");
+        Console.WriteLine("This usually means quota or rate limit problem.");
+        Console.WriteLine("Try again later, reduce prompt size, or choose another model.");
+    }
+    catch (Exception exception)
+    {
+        Console.WriteLine();
+        Console.WriteLine("Documentation RAG request failed.");
+        Console.WriteLine(exception.Message);
+    }
+}
+
+static string BuildRagPrompt(
+    string question,
+    IReadOnlyList<KnowledgeChunk> chunks)
+{
+    var context = string.Join(
+        "\n\n--- DOCUMENT CHUNK ---\n\n",
+        chunks.Select(chunk =>
+            $"""
+             Source file: {Path.GetFileName(chunk.Source)}
+             Chunk number: {chunk.Index}
+             Relevance score: {chunk.Score}
+
+             {chunk.Content}
+             """));
+
+    return $$"""
+             You must answer the user's question using the documentation context below.
+
+             Important rules:
+             - The documentation context is the only source of truth.
+             - If the context contains relevant information, answer the question directly.
+             - Do not say "Cannot answer" when the context contains useful instructions.
+             - Say "Cannot answer from the provided documentation." only when the context is unrelated to the question.
+             - Keep the answer practical and concise.
+             - If useful, mention the source file name.
+
+             Documentation context:
+             {{context}}
+
+             User question:
+             {{question}}
+
+             Answer:
+             """;
+}
+
+static void PrintRetrievedChunks(IReadOnlyList<KnowledgeChunk> chunks)
+{
+    Console.WriteLine();
+    Console.WriteLine("Retrieved documentation chunks:");
+
+    foreach (var chunk in chunks)
+    {
+        Console.WriteLine($"- Source: {Path.GetFileName(chunk.Source)}, Chunk: {chunk.Index}, Score: {chunk.Score}");
     }
 }
 

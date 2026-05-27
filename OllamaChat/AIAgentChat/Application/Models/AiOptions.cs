@@ -1,4 +1,4 @@
-namespace OllamaChat.Application.Models;
+namespace AIAgentChat.Application.Models;
 
 internal sealed class AiOptions
 {
