@@ -1,4 +1,5 @@
 ﻿using System.ClientModel;
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -41,6 +42,7 @@ Console.WriteLine("AI chat is ready.");
 Console.WriteLine($"Provider: {aiOptions.Provider}");
 Console.WriteLine($"Model: {aiOptions.Model}");
 Console.WriteLine("Type your prompt and press Enter.");
+Console.WriteLine("Type 'classify' to run structured output example.");
 Console.WriteLine("Type 'exit' to quit.");
 Console.WriteLine();
 
@@ -60,6 +62,13 @@ while (true)
     {
         Console.WriteLine("Goodbye.");
         break;
+    }
+
+    if (string.Equals(userPrompt, "classify", StringComparison.OrdinalIgnoreCase))
+    {
+        await ClassifyUserRequestAsync(chatClient);
+        Console.WriteLine();
+        continue;
     }
 
     chatHistory.Add(new ChatMessage(ChatRole.User, userPrompt));
@@ -110,7 +119,7 @@ while (true)
         Console.WriteLine("AI request failed.");
         Console.WriteLine(exception.Message);
     }
-    
+
     Console.WriteLine();
     Console.WriteLine();
 }
@@ -170,4 +179,193 @@ static AiOptions LoadAiOptions(AiModelOption selectedModel)
     aiOptions.Model = selectedModel.Model;
 
     return aiOptions;
+}
+
+static async Task ClassifyUserRequestAsync(IChatClient chatClient)
+{
+    Console.WriteLine();
+    Console.WriteLine("Structured output mode: user request classification.");
+    Console.WriteLine("Enter text that should be classified:");
+    var textToClassify = Console.ReadLine();
+
+    if (string.IsNullOrWhiteSpace(textToClassify))
+    {
+        Console.WriteLine("Text cannot be empty.");
+        return;
+    }
+
+    // This prompt asks the model to return JSON only.
+    //
+    // Important:
+    // We explicitly describe the required JSON shape because different providers
+    // may not support the same native structured-output features.
+    //
+    // This approach is provider-agnostic:
+    // - it can work with Ollama;
+    // - it can work with OpenAI;
+    // - it can work with Gemini;
+    // - it does not require provider-specific response_format APIs.
+    //
+    // Limitation:
+    // The model can still return invalid JSON, so the application must validate it.
+    var classificationPrompt = $$"""
+        You are a request classification engine.
+
+        Classify the user's message and return ONLY valid JSON.
+        Do not include markdown.
+        Do not include explanations.
+        Do not wrap the JSON in ```json blocks.
+
+        The JSON must have exactly this shape:
+        {
+          "category": "TechnicalSupport | Billing | Sales | GeneralQuestion | Unknown",
+          "priority": "Low | Medium | High | Critical",
+          "sentiment": "Positive | Neutral | Negative",
+          "summary": "Short one-sentence summary",
+          "shouldEscalate": true
+        }
+
+        Rules:
+        - Use "TechnicalSupport" for errors, bugs, crashes, setup problems, API issues, and integration problems.
+        - Use "Billing" for payments, invoices, subscription, quota, or pricing issues.
+        - Use "Sales" for buying, product comparison, or commercial questions.
+        - Use "GeneralQuestion" for simple questions that are not support, billing, or sales.
+        - Use "Unknown" if the message cannot be classified.
+        - Use "Critical" only when there is production outage, data loss, security issue, or blocked business-critical workflow.
+        - shouldEscalate must be true for Critical priority or when a human should review the request.
+
+        User message:
+        {{textToClassify}}
+        """;
+
+    var messages = new List<ChatMessage>
+    {
+        // This system message scopes the model behavior for this operation only.
+        // It is intentionally separate from normal chat history, because classification
+        // should not be influenced by previous casual conversation.
+        new(ChatRole.System, "You produce strict machine-readable JSON for application processing."),
+
+        // The user message contains the actual classification task.
+        new(ChatRole.User, classificationPrompt)
+    };
+
+    try
+    {
+        Console.WriteLine();
+        Console.WriteLine("Raw structured response from AI:");
+
+        var rawResponse = await ReadStreamingTextAsync(chatClient, messages);
+
+        Console.WriteLine();
+        Console.WriteLine();
+
+        if (!TryParseClassification(rawResponse, out var classification, out var error))
+        {
+            Console.WriteLine("Cannot process AI structured response.");
+            Console.WriteLine(error);
+            return;
+        }
+
+        PrintClassification(classification);
+    }
+    catch (ClientResultException exception) when (exception.Status == 429)
+    {
+        Console.WriteLine();
+        Console.WriteLine("AI provider returned HTTP 429.");
+        Console.WriteLine("This usually means quota or rate limit problem.");
+        Console.WriteLine("Try again later or choose another model.");
+    }
+    catch (Exception exception)
+    {
+        Console.WriteLine();
+        Console.WriteLine("Structured output request failed.");
+        Console.WriteLine(exception.Message);
+    }
+}
+
+static async Task<string> ReadStreamingTextAsync(
+    IChatClient chatClient,
+    IReadOnlyList<ChatMessage> messages)
+{
+    var response = "";
+
+    // We still use streaming here, even for structured output.
+    //
+    // This demonstrates that structured output and streaming can be combined:
+    // - the user sees the response as it arrives;
+    // - the application still collects the full response;
+    // - after streaming is complete, the application parses the final JSON.
+    await foreach (var item in chatClient.GetStreamingResponseAsync(messages))
+    {
+        Console.Write(item.Text);
+        response += item.Text;
+    }
+
+    return response;
+}
+
+static bool TryParseClassification(
+    string rawResponse,
+    out UserRequestClassification classification,
+    out string error)
+{
+    classification = new UserRequestClassification();
+    error = string.Empty;
+
+    if (string.IsNullOrWhiteSpace(rawResponse))
+    {
+        error = "AI returned an empty response.";
+        return false;
+    }
+
+    // Some models may still return markdown despite instructions.
+    // This small cleanup makes the demo more tolerant.
+    //
+    // In production, you may prefer to reject such responses instead of cleaning them.
+    var cleanedResponse = rawResponse
+        .Replace("```json", "", StringComparison.OrdinalIgnoreCase)
+        .Replace("```", "", StringComparison.OrdinalIgnoreCase)
+        .Trim();
+
+    try
+    {
+        var jsonOptions = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        };
+
+        var parsed = JsonSerializer.Deserialize<UserRequestClassification>(
+            cleanedResponse,
+            jsonOptions);
+
+        if (parsed is null)
+        {
+            error = "AI response could not be parsed into the expected object.";
+            return false;
+        }
+
+        if (!parsed.IsValid())
+        {
+            error = "AI response JSON is valid, but required fields are missing or empty.";
+            return false;
+        }
+
+        classification = parsed;
+        return true;
+    }
+    catch (JsonException exception)
+    {
+        error = $"AI response is not valid JSON: {exception.Message}";
+        return false;
+    }
+}
+
+static void PrintClassification(UserRequestClassification classification)
+{
+    Console.WriteLine("Parsed structured result:");
+    Console.WriteLine($"Category: {classification.Category}");
+    Console.WriteLine($"Priority: {classification.Priority}");
+    Console.WriteLine($"Sentiment: {classification.Sentiment}");
+    Console.WriteLine($"Summary: {classification.Summary}");
+    Console.WriteLine($"Should escalate: {classification.ShouldEscalate}");
 }
