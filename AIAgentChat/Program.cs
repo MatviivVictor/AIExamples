@@ -30,9 +30,10 @@ builder.Services.AddChatClient(_ => AiChatClientFactory.Create(aiOptions));
 var app = builder.Build();
 
 var chatClient = app.Services.GetRequiredService<IChatClient>();
+var embeddingGenerator = AiChatClientFactory.CreateEmbeddingGenerator(aiOptions);
 
 var manualPath = Path.Combine(AppContext.BaseDirectory, "Manuals", "user-guid.md");
-var knowledgeBase = new KnowledgeBaseService(manualPath);
+var knowledgeBase = new KnowledgeBaseService(manualPath, embeddingGenerator, chatClient);
 
 var chatHistory = new List<ChatMessage>();
 
@@ -393,7 +394,7 @@ static async Task AnswerFromDocumentationAsync(
 
     try
     {
-        chunks = knowledgeBase.Search(question, maxResults: 3);
+        chunks = await knowledgeBase.SearchAsync(question, maxResults: 3);
     }
     catch (FileNotFoundException exception)
     {

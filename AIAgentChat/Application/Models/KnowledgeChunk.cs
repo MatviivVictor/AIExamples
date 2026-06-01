@@ -30,11 +30,12 @@ internal sealed class KnowledgeChunk
     public string Content { get; init; } = string.Empty;
 
     /// <summary>
-    /// Simple relevance score calculated by keyword matching.
-    /// 
-    /// This is not a real vector similarity score.
-    /// It is a lightweight implementation for learning purposes.
-    /// Later it can be replaced with embeddings and vector search.
+    /// Simple relevance score calculated by keyword matching or vector similarity.
     /// </summary>
-    public int Score { get; init; }
+    public double Score { get; init; }
+
+    /// <summary>
+    /// Vector representation of the chunk content.
+    /// </summary>
+    public ReadOnlyMemory<float> Embedding { get; init; }
 }

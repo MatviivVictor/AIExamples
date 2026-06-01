@@ -3,6 +3,7 @@ using AIAgentChat.Application.Models;
 using OllamaSharp;
 using OpenAI;
 using System.ClientModel;
+using OpenAI.Embeddings;
 
 internal static class AiChatClientFactory
 {
@@ -24,6 +25,23 @@ internal static class AiChatClientFactory
         }
 
         throw new NotSupportedException($"Provider '{options.Provider}' is not supported.");
+    }
+
+    public static IEmbeddingGenerator<string, Embedding<float>> CreateEmbeddingGenerator(AiOptions options)
+    {
+        if (options.IsOllama())
+        {
+            return new OllamaApiClient(new Uri(options.Endpoint), options.EmbeddingModel ?? "all-minilm");
+        }
+
+        if (options.IsOpenAI() || options.IsGemini())
+        {
+            // Fallback for demo if package extensions are missing
+            // In a real project we would ensure Microsoft.Extensions.AI.OpenAI is installed.
+            throw new NotSupportedException($"Embedding generator for {options.Provider} requires additional package configuration.");
+        }
+
+        throw new NotSupportedException($"Provider '{options.Provider}' is not supported for embeddings.");
     }
 
     private static IChatClient CreateOllamaClient(AiOptions options)

@@ -1,83 +1,157 @@
 using System.Text.RegularExpressions;
+using System.Numerics.Tensors;
+using Microsoft.Extensions.AI;
 using AIAgentChat.Application.Extensions;
 using AIAgentChat.Application.Models;
 
 namespace AIAgentChat.Application.Services;
 
 /// <summary>
-/// Provides a very simple local knowledge base for RAG.
-/// 
-/// This is an educational implementation of retrieval.
-/// It does not use embeddings yet.
-/// Instead, it uses:
-/// - Markdown document loading;
-/// - chunking;
-/// - keyword-based relevance scoring.
-/// 
-/// Later this service can be replaced or extended with:
-/// - embeddings;
-/// - vector database;
-/// - hybrid search;
-/// - reranking.
+/// Provides an improved local knowledge base for RAG with hybrid search and semantic ranking.
 /// </summary>
 internal sealed class KnowledgeBaseService
 {
     private const int MaxChunkLength = 1_500;
 
     private readonly string _manualPath;
+    private readonly IEmbeddingGenerator<string, Embedding<float>>? _embeddingGenerator;
+    private readonly IChatClient? _chatClient;
 
     private IReadOnlyList<KnowledgeChunk>? _cachedChunks;
 
-    public KnowledgeBaseService(string manualPath)
+    public KnowledgeBaseService(
+        string manualPath,
+        IEmbeddingGenerator<string, Embedding<float>>? embeddingGenerator = null,
+        IChatClient? chatClient = null)
     {
         _manualPath = manualPath;
+        _embeddingGenerator = embeddingGenerator;
+        _chatClient = chatClient;
     }
 
     /// <summary>
-    /// Searches the knowledge base and returns the most relevant chunks.
-    /// 
-    /// The current search is intentionally simple:
-    /// - extract words from the user question;
-    /// - compare them with each chunk;
-    /// - score chunks by the number of keyword matches;
-    /// - return the best chunks.
+    /// Searches the knowledge base and returns the most relevant chunks using hybrid search and semantic ranking.
     /// </summary>
-    public IReadOnlyList<KnowledgeChunk> Search(string question, int maxResults = 3)
+    public async Task<IReadOnlyList<KnowledgeChunk>> SearchAsync(string question, int maxResults = 3)
     {
         if (string.IsNullOrWhiteSpace(question))
         {
             return [];
         }
 
-        var chunks = GetOrLoadChunks();
+        var chunks = await GetOrLoadChunksAsync();
 
+        // 1. Keyword search (BM25-like / Simple frequency)
         var queryTerms = ExtractSearchTerms(question);
-
-        if (queryTerms.Count == 0)
-        {
-            return [];
-        }
-
-        return chunks
-            .Select(chunk => chunk.WithScore( CalculateScore(chunk.Content, queryTerms)))
+        var keywordResults = chunks
+            .Select(chunk => chunk.WithScore(CalculateScore(chunk.Content, queryTerms)))
             .Where(chunk => chunk.Score > 0)
             .OrderByDescending(chunk => chunk.Score)
-            .ThenBy(chunk => chunk.Index)
-            .Take(maxResults)
+            .ToList();
+
+        // 2. Vector search
+        List<KnowledgeChunk> vectorResults = [];
+        if (_embeddingGenerator != null)
+        {
+            var questionEmbedding = await _embeddingGenerator.GenerateAsync([question]);
+            vectorResults = chunks
+                .Select(chunk => chunk.WithScore(TensorPrimitives.CosineSimilarity(chunk.Embedding.Span, questionEmbedding[0].Vector.Span)))
+                .OrderByDescending(chunk => chunk.Score)
+                .ToList();
+        }
+
+        // 3. Hybrid scoring (Reciprocal Rank Fusion)
+        var hybridResults = PerformRRF(keywordResults, vectorResults, topK: 10);
+
+        // 4. Semantic Ranking (Llama)
+        if (_chatClient != null && hybridResults.Count > 0)
+        {
+            hybridResults = await SemanticReRankingAsync(question, hybridResults, maxResults);
+        }
+
+        return hybridResults.Take(maxResults).ToList();
+    }
+
+    private static List<KnowledgeChunk> PerformRRF(
+        List<KnowledgeChunk> keywordResults,
+        List<KnowledgeChunk> vectorResults,
+        int topK)
+    {
+        var scores = new Dictionary<int, double>();
+        const double k = 60.0;
+
+        for (int i = 0; i < keywordResults.Count; i++)
+        {
+            var chunk = keywordResults[i];
+            scores[chunk.Index] = 1.0 / (k + i + 1);
+        }
+
+        for (int i = 0; i < vectorResults.Count; i++)
+        {
+            var chunk = vectorResults[i];
+            var score = 1.0 / (k + i + 1);
+            if (scores.TryGetValue(chunk.Index, out var existing))
+            {
+                scores[chunk.Index] = existing + score;
+            }
+            else
+            {
+                scores[chunk.Index] = score;
+            }
+        }
+
+        var allChunks = keywordResults.Concat(vectorResults)
+            .GroupBy(c => c.Index)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        return scores
+            .OrderByDescending(kvp => kvp.Value)
+            .Take(topK)
+            .Select(kvp => allChunks[kvp.Key].WithScore(kvp.Value))
             .ToList();
     }
 
-    /// <summary>
-    /// Loads chunks once and keeps them in memory.
-    /// 
-    /// This is enough for a small console demo.
-    /// In production, you may want:
-    /// - indexing at application startup;
-    /// - background refresh;
-    /// - persistent vector store;
-    /// - file change tracking.
-    /// </summary>
-    private IReadOnlyList<KnowledgeChunk> GetOrLoadChunks()
+    private async Task<List<KnowledgeChunk>> SemanticReRankingAsync(
+        string question,
+        List<KnowledgeChunk> candidates,
+        int maxResults)
+    {
+        var candidatesText = string.Join("\n\n", candidates.Select((c, i) => $"ID: {i}\nContent: {c.Content}"));
+
+        var prompt = $"""
+            You are a semantic reranking engine.
+            Given a user question and a list of documentation chunks, identify the most relevant chunks that can help answer the question.
+            
+            Return ONLY a comma-separated list of IDs in order of relevance, from most relevant to least relevant.
+            Example: 2,0,3
+            
+            Question: {question}
+            
+            Chunks:
+            {candidatesText}
+            """;
+
+        var response = await _chatClient!.GetResponseAsync(prompt);
+        var responseText = response.ToString() ?? "";
+        
+        var rankedIndices = responseText.Split(',')
+            .Select(s => int.TryParse(s.Trim(), out var id) ? id : -1)
+            .Where(id => id >= 0 && id < candidates.Count)
+            .Distinct()
+            .ToList();
+
+        var rankedResults = rankedIndices
+            .Select(id => candidates[id])
+            .ToList();
+
+        // Add remaining candidates that weren't mentioned by LLM
+        var remaining = candidates.Where(c => !rankedResults.Contains(c));
+        rankedResults.AddRange(remaining);
+
+        return rankedResults;
+    }
+
+    private async Task<IReadOnlyList<KnowledgeChunk>> GetOrLoadChunksAsync()
     {
         if (_cachedChunks is not null)
         {
@@ -93,7 +167,23 @@ internal sealed class KnowledgeBaseService
 
         var markdown = File.ReadAllText(_manualPath);
 
-        _cachedChunks = ChunkMarkdown(markdown, _manualPath);
+        var chunks = ChunkMarkdown(markdown, _manualPath);
+
+        if (_embeddingGenerator != null)
+        {
+            var contents = chunks.Select(c => c.Content).ToList();
+            var embeddings = await _embeddingGenerator.GenerateAsync(contents);
+
+            chunks = chunks.Select((chunk, i) => new KnowledgeChunk
+            {
+                Index = chunk.Index,
+                Source = chunk.Source,
+                Content = chunk.Content,
+                Embedding = embeddings[i].Vector
+            }).ToList();
+        }
+
+        _cachedChunks = chunks;
 
         return _cachedChunks;
     }
@@ -203,18 +293,28 @@ internal sealed class KnowledgeBaseService
     }
 
     /// <summary>
-    /// Calculates simple keyword-based relevance score.
-    /// 
-    /// This is not semantic search.
-    /// For example, "quota" and "limit" are different words here,
-    /// even though they may be semantically related.
-    /// 
-    /// This limitation is exactly why real RAG systems use embeddings.
+    /// Calculates simple keyword-based relevance score using term frequency.
     /// </summary>
-    private static int CalculateScore(string content, HashSet<string> queryTerms)
+    private static double CalculateScore(string content, HashSet<string> queryTerms)
     {
         var contentLower = content.ToLowerInvariant();
+        var words = Regex.Matches(contentLower, @"[\p{L}\p{N}]+")
+            .Select(m => m.Value)
+            .ToList();
 
-        return queryTerms.Count(term => contentLower.Contains(term));
+        if (words.Count == 0) return 0;
+
+        double score = 0;
+        foreach (var term in queryTerms)
+        {
+            int count = words.Count(w => w == term);
+            if (count > 0)
+            {
+                // Simple TF-like score
+                score += (double)count / words.Count;
+            }
+        }
+
+        return score;
     }
 }

@@ -10,13 +10,14 @@ internal static class KnowledgeChunkExtensions
     /// KnowledgeChunk is a class, not a record, so we use this helper
     /// to keep scoring code readable.
     /// </summary>
-    public static KnowledgeChunk WithScore(this KnowledgeChunk chunk, int score)
+    public static KnowledgeChunk WithScore(this KnowledgeChunk chunk, double score)
     {
         return new KnowledgeChunk
         {
             Index = chunk.Index,
             Source = chunk.Source,
             Content = chunk.Content,
+            Embedding = chunk.Embedding,
             Score = score
         };
     }

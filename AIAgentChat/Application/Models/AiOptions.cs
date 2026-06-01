@@ -8,6 +8,8 @@ internal sealed class AiOptions
 
     public string Model { get; set; } = "llama3";
 
+    public string? EmbeddingModel { get; set; } = "all-minilm";
+
     public string? ApiKeyEnvironmentVariable { get; set; }
 
     public string? SystemPrompt { get; set; }
