@@ -13,6 +13,8 @@ internal sealed class AiOptions
     public string? ApiKeyEnvironmentVariable { get; set; }
 
     public string? SystemPrompt { get; set; }
+    
+    public int TimeoutSeconds { get; set; } = 300;
 
     public void Validate()
     {
