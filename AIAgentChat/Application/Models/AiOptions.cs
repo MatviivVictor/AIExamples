@@ -8,7 +8,7 @@ internal sealed class AiOptions
 
     public string Model { get; set; } = "llama3";
 
-    public string? EmbeddingModel { get; set; } = "all-minilm";
+    public string? EmbeddingModel { get; set; } = "nomic-embed-text";
 
     public string? ApiKeyEnvironmentVariable { get; set; }
 
@@ -29,6 +29,11 @@ internal sealed class AiOptions
         if (IsOllama() && string.IsNullOrWhiteSpace(Endpoint))
         {
             throw new InvalidOperationException("Ollama endpoint is not configured.");
+        }
+
+        if (IsOllama() && string.IsNullOrWhiteSpace(EmbeddingModel))
+        {
+            throw new InvalidOperationException("Ollama embedding model is not configured.");
         }
 
         if ((IsOpenAI() || IsGemini()) && string.IsNullOrWhiteSpace(ApiKeyEnvironmentVariable))

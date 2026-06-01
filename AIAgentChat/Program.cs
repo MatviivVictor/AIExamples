@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using AIAgentChat.Application.Models;
 using AIAgentChat.Application.Services;
+using OllamaSharp;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -30,7 +31,10 @@ builder.Services.AddChatClient(_ => AiChatClientFactory.Create(aiOptions));
 var app = builder.Build();
 
 var chatClient = app.Services.GetRequiredService<IChatClient>();
-var embeddingGenerator = AiChatClientFactory.CreateEmbeddingGenerator(aiOptions);
+
+var embeddingGenerator = new OllamaApiClient(
+    new Uri(aiOptions.Endpoint),
+    aiOptions.EmbeddingModel ?? "nomic-embed-text");
 
 var manualPath = Path.Combine(AppContext.BaseDirectory, "Manuals", "user-guid.md");
 var knowledgeBase = new KnowledgeBaseService(manualPath, embeddingGenerator, chatClient);
@@ -400,6 +404,23 @@ static async Task AnswerFromDocumentationAsync(
     {
         Console.WriteLine();
         Console.WriteLine("Knowledge base file was not found.");
+        Console.WriteLine(exception.Message);
+        return;
+    }
+    catch (HttpRequestException exception)
+    {
+        Console.WriteLine();
+        Console.WriteLine("Failed to generate embeddings through Ollama.");
+        Console.WriteLine("Most likely causes:");
+        Console.WriteLine("- Ollama is not running.");
+        Console.WriteLine("- Embedding model is not installed.");
+        Console.WriteLine("- Ollama version does not support embeddings endpoint.");
+        Console.WriteLine();
+        Console.WriteLine("Try:");
+        Console.WriteLine("  ollama pull nomic-embed-text");
+        Console.WriteLine("  ollama list");
+        Console.WriteLine("  ollama serve");
+        Console.WriteLine();
         Console.WriteLine(exception.Message);
         return;
     }
