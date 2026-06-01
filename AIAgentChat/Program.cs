@@ -39,9 +39,7 @@ var inputGuardrail = app.Services.GetRequiredService<InputGuardrailService>();
 var outputGuardrail = app.Services.GetRequiredService<OutputGuardrailService>();
 var ragGuardrail = app.Services.GetRequiredService<RagGuardrailService>();
 
-var embeddingGenerator = new OllamaApiClient(
-    new Uri(aiOptions.Endpoint),
-    aiOptions.EmbeddingModel ?? "nomic-embed-text");
+var embeddingGenerator = AiChatClientFactory.CreateEmbeddingGenerator(aiOptions);
 
 var manualPath = Path.Combine(AppContext.BaseDirectory, "Manuals", "user-guid.md");
 var knowledgeBase = new KnowledgeBaseService(manualPath, embeddingGenerator, chatClient);

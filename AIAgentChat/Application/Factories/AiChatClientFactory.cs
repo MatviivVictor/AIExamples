@@ -30,7 +30,11 @@ internal static class AiChatClientFactory
     {
         if (options.IsOllama())
         {
-            return new OllamaApiClient(new Uri(options.Endpoint), options.EmbeddingModel ?? "all-minilm");
+            var httpClient = CreateOllamaHttpClient(options);
+
+            return new OllamaApiClient(
+                httpClient,
+                options.EmbeddingModel ?? "nomic-embed-text");
         }
 
         if (options.IsOpenAI() || options.IsGemini())
@@ -45,7 +49,18 @@ internal static class AiChatClientFactory
 
     private static IChatClient CreateOllamaClient(AiOptions options)
     {
-        return new OllamaApiClient(new Uri(options.Endpoint), options.Model);
+        var httpClient = CreateOllamaHttpClient(options);
+
+        return new OllamaApiClient(httpClient, options.Model);
+    }
+
+    private static HttpClient CreateOllamaHttpClient(AiOptions options)
+    {
+        return new HttpClient
+        {
+            BaseAddress = new Uri(options.Endpoint),
+            Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds)
+        };
     }
 
     private static IChatClient CreateOpenAIClient(AiOptions options)
