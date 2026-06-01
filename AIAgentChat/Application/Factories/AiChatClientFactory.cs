@@ -3,7 +3,6 @@ using AIAgentChat.Application.Models;
 using OllamaSharp;
 using OpenAI;
 using System.ClientModel;
-using OpenAI.Embeddings;
 
 internal static class AiChatClientFactory
 {
