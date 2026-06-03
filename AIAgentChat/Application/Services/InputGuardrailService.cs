@@ -2,7 +2,7 @@ using AIAgentChat.Application.Models;
 
 namespace AIAgentChat.Application.Services;
 
-internal sealed class InputGuardrailService
+public sealed class InputGuardrailService
 {
     private const int MaxInputLength = 2000;
 

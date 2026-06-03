@@ -1,6 +1,6 @@
 namespace AIAgentChat.Application.Models;
 
-internal enum GuardrailRiskLevel
+public enum GuardrailRiskLevel
 {
     Low,
     Medium,

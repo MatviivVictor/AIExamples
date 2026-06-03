@@ -3,7 +3,7 @@ using AIAgentChat.Application.Models;
 
 namespace AIAgentChat.Application.Services;
 
-internal sealed partial class OutputGuardrailService
+public sealed partial class OutputGuardrailService
 {
     [GeneratedRegex(@"(?i)(api[_-]?key|password|secret|token)[\s:=]+[a-z0-9\-_]{16,}", RegexOptions.Compiled)]
     private static partial Regex SecretRegex();

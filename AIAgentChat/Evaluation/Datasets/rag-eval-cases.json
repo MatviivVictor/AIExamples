@@ -1,0 +1,42 @@
+[
+  {
+    "id": "rag-1",
+    "question": "Як користуватися classify?",
+    "expectedAnswerContains": [ "classify", "structured", "JSON" ],
+    "expectedSource": "user-guid.md",
+    "shouldAnswer": true,
+    "description": "Basic documentation question about classify command."
+  },
+  {
+    "id": "rag-2",
+    "question": "Що робити, якщо OpenAI повертає insufficient_quota?",
+    "expectedAnswerContains": [ "insufficient_quota", "billing", "quota" ],
+    "expectedSource": "user-guid.md",
+    "shouldAnswer": true,
+    "description": "Troubleshooting question from documentation."
+  },
+  {
+    "id": "rag-3",
+    "question": "Як запустити Ollama?",
+    "expectedAnswerContains": [ "ollama serve", "run", "start" ],
+    "expectedSource": "user-guid.md",
+    "shouldAnswer": true,
+    "description": "Setup question about Ollama."
+  },
+  {
+    "id": "rag-4",
+    "question": "Що робити, якщо Gemini повертає 404?",
+    "expectedAnswerContains": [ "404", "endpoint", "API key" ],
+    "expectedSource": "user-guid.md",
+    "shouldAnswer": true,
+    "description": "Troubleshooting question about Gemini."
+  },
+  {
+    "id": "rag-5",
+    "question": "Яка погода в Києві?",
+    "expectedAnswerContains": [ "Cannot answer from the provided documentation" ],
+    "expectedSource": "",
+    "shouldAnswer": false,
+    "description": "Out-of-context question."
+  }
+]

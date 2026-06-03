@@ -1,6 +1,6 @@
 namespace AIAgentChat.Application.Models;
 
-internal sealed class GuardrailResult
+public sealed class GuardrailResult
 {
     public bool IsAllowed { get; init; }
     public string Reason { get; init; } = string.Empty;

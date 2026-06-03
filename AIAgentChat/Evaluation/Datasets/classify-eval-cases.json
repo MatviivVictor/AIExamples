@@ -1,0 +1,47 @@
+[
+  {
+    "id": "classify-1",
+    "input": "production chatbot is down",
+    "expectedCategory": "TechnicalSupport",
+    "expectedPriority": "Critical",
+    "expectedSentiment": "Negative",
+    "expectedShouldEscalate": true,
+    "description": "Production outage."
+  },
+  {
+    "id": "classify-2",
+    "input": "charged twice for this month",
+    "expectedCategory": "Billing",
+    "expectedPriority": "High",
+    "expectedSentiment": "Negative",
+    "expectedShouldEscalate": true,
+    "description": "Billing issue."
+  },
+  {
+    "id": "classify-3",
+    "input": "which plan is best for a small team?",
+    "expectedCategory": "Sales",
+    "expectedPriority": "Medium",
+    "expectedSentiment": "Neutral",
+    "expectedShouldEscalate": false,
+    "description": "Sales inquiry."
+  },
+  {
+    "id": "classify-4",
+    "input": "how does this project work?",
+    "expectedCategory": "GeneralQuestion",
+    "expectedPriority": "Low",
+    "expectedSentiment": "Neutral",
+    "expectedShouldEscalate": false,
+    "description": "General question."
+  },
+  {
+    "id": "classify-5",
+    "input": "asdfasdf qwerty 123",
+    "expectedCategory": "Unknown",
+    "expectedPriority": "Low",
+    "expectedSentiment": "Neutral",
+    "expectedShouldEscalate": false,
+    "description": "Unclear text."
+  }
+]

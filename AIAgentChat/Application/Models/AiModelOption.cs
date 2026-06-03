@@ -1,6 +1,6 @@
 namespace AIAgentChat.Application.Models;
 
-internal sealed class AiModelOption
+public sealed class AiModelOption
 {
     public string Id { get; init; } = string.Empty;
 
