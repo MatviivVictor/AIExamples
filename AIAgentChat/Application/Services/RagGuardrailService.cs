@@ -2,7 +2,7 @@ using AIAgentChat.Application.Models;
 
 namespace AIAgentChat.Application.Services;
 
-internal sealed class RagGuardrailService
+public sealed class RagGuardrailService
 {
     private readonly string[] _suspiciousInstructions =
     [

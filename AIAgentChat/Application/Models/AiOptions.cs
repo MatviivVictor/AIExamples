@@ -1,6 +1,6 @@
 namespace AIAgentChat.Application.Models;
 
-internal sealed class AiOptions
+public sealed class AiOptions
 {
     public string Provider { get; set; } = "Ollama";
 

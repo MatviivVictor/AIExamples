@@ -9,7 +9,7 @@ namespace AIAgentChat.Application.Models;
 /// 
 /// In a production system, you could replace strings with enums and add stricter validation.
 /// </summary>
-internal sealed class UserRequestClassification
+public sealed class UserRequestClassification
 {
     /// <summary>
     /// High-level category of the user's request.

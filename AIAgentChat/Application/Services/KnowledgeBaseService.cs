@@ -9,7 +9,7 @@ namespace AIAgentChat.Application.Services;
 /// <summary>
 /// Provides an improved local knowledge base for RAG with hybrid search and semantic ranking.
 /// </summary>
-internal sealed class KnowledgeBaseService
+public sealed class KnowledgeBaseService
 {
     private const int MaxChunkLength = 1_500;
 

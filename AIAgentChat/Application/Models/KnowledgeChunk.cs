@@ -9,7 +9,7 @@ namespace AIAgentChat.Application.Models;
 /// The application searches among chunks, selects the most relevant ones,
 /// and sends only those chunks to the AI model as context.
 /// </summary>
-internal sealed class KnowledgeChunk
+public sealed class KnowledgeChunk
 {
     /// <summary>
     /// Chunk identifier inside the source document.
