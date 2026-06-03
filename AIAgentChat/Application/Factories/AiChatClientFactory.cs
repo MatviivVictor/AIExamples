@@ -37,16 +37,55 @@ internal static class AiChatClientFactory
                 options.EmbeddingModel ?? "nomic-embed-text");
         }
 
-        if (options.IsOpenAI() || options.IsGemini())
+        if (options.IsOpenAI())
         {
-            // Fallback for demo if package extensions are missing
-            // In a real project we would ensure Microsoft.Extensions.AI.OpenAI is installed.
-            throw new NotSupportedException($"Embedding generator for {options.Provider} requires additional package configuration.");
+            return CreateOpenAIEmbeddingGenerator(options);
+        }
+
+        if (options.IsGemini())
+        {
+            return CreateGeminiEmbeddingGenerator(options);
         }
 
         throw new NotSupportedException($"Provider '{options.Provider}' is not supported for embeddings.");
     }
 
+    private static IEmbeddingGenerator<string, Embedding<float>> CreateGeminiEmbeddingGenerator(AiOptions options)
+    {
+        var apiKey = GetRequiredApiKey(options);
+        var embeddingModel = GetRequiredEmbeddingModel(options);
+
+        var openAIClientOptions = new OpenAIClientOptions
+        {
+            Endpoint = new Uri(options.Endpoint)
+        };
+
+        return new OpenAIClient(new ApiKeyCredential(apiKey), openAIClientOptions)
+            .GetEmbeddingClient(embeddingModel)
+            .AsIEmbeddingGenerator();
+    }
+
+    private static IEmbeddingGenerator<string, Embedding<float>> CreateOpenAIEmbeddingGenerator(AiOptions options)
+    {
+        var apiKey = GetRequiredApiKey(options);
+        var embeddingModel = GetRequiredEmbeddingModel(options);
+
+        return new OpenAIClient(new ApiKeyCredential(apiKey))
+            .GetEmbeddingClient(embeddingModel)
+            .AsIEmbeddingGenerator();
+    }
+    
+    private static string GetRequiredEmbeddingModel(AiOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(options.EmbeddingModel))
+        {
+            throw new InvalidOperationException(
+                $"Embedding model is not configured for provider '{options.Provider}'.");
+        }
+
+        return options.EmbeddingModel;
+    }
+    
     private static IChatClient CreateOllamaClient(AiOptions options)
     {
         var httpClient = CreateOllamaHttpClient(options);
