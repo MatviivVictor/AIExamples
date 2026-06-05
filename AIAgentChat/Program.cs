@@ -4,8 +4,11 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using AIAgentChat.Application.Models;
 using AIAgentChat.Application.Services;
+using AIAgentChat.Application.Services.Caching;
+using AIAgentChat.Application.Utilities;
 using OllamaSharp;
 
 using AIAgentChat.Application.Services.Evaluation;
@@ -13,6 +16,11 @@ using AIAgentChat.Application.Models.Evaluation;
 using System.Diagnostics;
 
 var builder = Host.CreateApplicationBuilder(args);
+
+// Configure Logging
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.AddConfiguration(builder.Configuration.GetSection("Logging"));
 
 var availableModels = builder.Configuration
     .GetSection("AiModels")
@@ -30,6 +38,13 @@ var aiOptions = LoadAiOptions(selectedModel);
 aiOptions.Validate();
 
 builder.Services.AddSingleton(aiOptions);
+
+// Caching
+var cacheOptions = builder.Configuration.GetSection("Cache").Get<CacheOptions>() ?? new CacheOptions();
+builder.Services.AddSingleton(cacheOptions);
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<AppCacheService>();
+
 builder.Services.AddChatClient(_ => AiChatClientFactory.Create(aiOptions));
 
 builder.Services.AddSingleton(sp =>
@@ -56,6 +71,11 @@ builder.Services.AddSingleton<GuardrailsEvaluator>();
 builder.Services.AddSingleton<EvaluationRunner>();
 
 var app = builder.Build();
+
+var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("AIAgentChat");
+logger.LogInformation("Application started.");
+logger.LogInformation("Selected model: {ModelDisplayName} ({Provider}/{Model})", 
+    selectedModel.DisplayName, selectedModel.Provider, selectedModel.Model);
 
 var chatClient = app.Services.GetRequiredService<IChatClient>();
 var inputGuardrail = app.Services.GetRequiredService<InputGuardrailService>();
@@ -104,29 +124,33 @@ while (true)
 
     if (string.Equals(userPrompt, "classify", StringComparison.OrdinalIgnoreCase))
     {
-        await ClassifyUserRequestAsync(classificationService);
+        await ClassifyUserRequestAsync(classificationService, logger);
         Console.WriteLine();
         continue;
     }
 
     if (string.Equals(userPrompt, "docs", StringComparison.OrdinalIgnoreCase))
     {
-        await AnswerFromDocumentationAsync(ragService);
+        await AnswerFromDocumentationAsync(ragService, logger);
         Console.WriteLine();
         continue;
     }
 
     if (string.Equals(userPrompt, "eval", StringComparison.OrdinalIgnoreCase))
     {
-        await RunEvaluationMenuAsync(evaluationRunner);
+        await RunEvaluationMenuAsync(evaluationRunner, logger);
         Console.WriteLine();
         continue;
     }
+
+    logger.LogInformation("Starting regular chat request. Input length: {Length}, Hash: {Hash}", 
+        userPrompt.Length, SafeLogText.CreateSha256Hash(userPrompt));
 
     // Застосування Input Guardrails для звичайного чату
     var inputResult = inputGuardrail.Validate(userPrompt);
     if (!inputResult.IsAllowed)
     {
+        logger.LogWarning("Input guardrail blocked user prompt: {Reason}", inputResult.UserMessage);
         Console.WriteLine();
         Console.ForegroundColor = ConsoleColor.Yellow;
         Console.WriteLine(inputResult.UserMessage);
@@ -150,6 +174,7 @@ while (true)
         }
 
         Console.WriteLine();
+        logger.LogInformation("Chat request completed. Output length: {Length}", chatResponse.Length);
 
         // Застосування Output Guardrails після завершення стрімінгу
         var outputResult = outputGuardrail.Validate(chatResponse);
@@ -159,6 +184,7 @@ while (true)
         }
         else
         {
+            logger.LogWarning("Output guardrail blocked AI response.");
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.Red;
             Console.WriteLine(outputResult.UserMessage);
@@ -167,6 +193,7 @@ while (true)
     }
     catch (ClientResultException exception) when (exception.Status == 429)
     {
+        logger.LogError(exception, "AI provider returned HTTP 429.");
         chatHistory.RemoveAt(chatHistory.Count - 1);
 
         Console.WriteLine();
@@ -191,6 +218,7 @@ while (true)
     }
     catch (Exception exception)
     {
+        logger.LogError(exception, "AI request failed.");
         chatHistory.RemoveAt(chatHistory.Count - 1);
 
         Console.WriteLine();
@@ -259,7 +287,7 @@ static AiOptions LoadAiOptions(AiModelOption selectedModel)
     return aiOptions;
 }
 
-static async Task ClassifyUserRequestAsync(ClassificationService classificationService)
+static async Task ClassifyUserRequestAsync(ClassificationService classificationService, ILogger logger)
 {
     Console.WriteLine();
     Console.WriteLine("Structured output mode: user request classification.");
@@ -290,13 +318,14 @@ static async Task ClassifyUserRequestAsync(ClassificationService classificationS
     }
     catch (Exception exception)
     {
+        logger.LogError(exception, "Structured output request failed.");
         Console.WriteLine();
         Console.WriteLine("Structured output request failed.");
         Console.WriteLine(exception.Message);
     }
 }
 
-static async Task AnswerFromDocumentationAsync(RagService ragService)
+static async Task AnswerFromDocumentationAsync(RagService ragService, ILogger logger)
 {
     Console.WriteLine();
     Console.WriteLine("Documentation RAG mode.");
@@ -333,13 +362,14 @@ static async Task AnswerFromDocumentationAsync(RagService ragService)
     }
     catch (Exception exception)
     {
+        logger.LogError(exception, "Documentation RAG request failed.");
         Console.WriteLine();
         Console.WriteLine("Documentation RAG request failed.");
         Console.WriteLine(exception.Message);
     }
 }
 
-static async Task RunEvaluationMenuAsync(EvaluationRunner evaluationRunner)
+static async Task RunEvaluationMenuAsync(EvaluationRunner evaluationRunner, ILogger logger)
 {
     while (true)
     {
@@ -353,6 +383,10 @@ static async Task RunEvaluationMenuAsync(EvaluationRunner evaluationRunner)
         Console.Write("Select an option: ");
 
         var input = Console.ReadLine();
+
+        if (input == "5") return;
+
+        logger.LogInformation("Starting evaluation suite: {Option}", input);
 
         switch (input)
         {
@@ -368,12 +402,12 @@ static async Task RunEvaluationMenuAsync(EvaluationRunner evaluationRunner)
             case "4":
                 await evaluationRunner.RunAllEvaluationsAsync();
                 break;
-            case "5":
-                return;
             default:
                 Console.WriteLine("Invalid option.");
                 break;
         }
+        
+        logger.LogInformation("Evaluation suite completed: {Option}", input);
     }
 }
 

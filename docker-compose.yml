@@ -1,0 +1,15 @@
+services:
+  aiagentchat:
+    build:
+      context: .
+      dockerfile: AIAgentChat/Dockerfile
+    image: aiagentchat:latest
+    stdin_open: true
+    tty: true
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    volumes:
+      - ./AIAgentChat/Evaluation/Results:/app/Evaluation/Results
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

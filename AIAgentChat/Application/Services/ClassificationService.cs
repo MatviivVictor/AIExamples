@@ -1,6 +1,9 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using AIAgentChat.Application.Models;
+using Microsoft.Extensions.Logging;
+using AIAgentChat.Application.Services.Caching;
+using AIAgentChat.Application.Utilities;
 
 namespace AIAgentChat.Application.Services;
 
@@ -9,28 +12,48 @@ public class ClassificationService
     private readonly IChatClient _chatClient;
     private readonly InputGuardrailService _inputGuardrail;
     private readonly OutputGuardrailService _outputGuardrail;
+    private readonly AppCacheService _cache;
+    private readonly ILogger<ClassificationService> _logger;
+    private readonly AiOptions _aiOptions;
 
     public ClassificationService(
         IChatClient chatClient,
         InputGuardrailService inputGuardrail,
-        OutputGuardrailService outputGuardrail)
+        OutputGuardrailService outputGuardrail,
+        AppCacheService cache,
+        ILogger<ClassificationService> logger,
+        AiOptions aiOptions)
     {
         _chatClient = chatClient;
         _inputGuardrail = inputGuardrail;
         _outputGuardrail = outputGuardrail;
+        _cache = cache;
+        _logger = logger;
+        _aiOptions = aiOptions;
     }
 
     public async Task<ClassificationResult> ClassifyAsync(string input, CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("Starting classify for input: {InputPreview}", SafeLogText.CreatePreview(input));
+
         // 1. Input Guardrails
         var inputResult = _inputGuardrail.Validate(input);
         if (!inputResult.IsAllowed)
         {
+            _logger.LogWarning("Input guardrail blocked classify request: {Reason}", inputResult.UserMessage);
             return new ClassificationResult
             {
                 Success = false,
                 Error = inputResult.UserMessage
             };
+        }
+
+        var inputHash = SafeLogText.CreateSha256Hash(input);
+        var cacheKey = _cache.BuildKey("classify", _aiOptions.Provider, _aiOptions.Model, inputHash);
+
+        if (_cache.TryGet<ClassificationResult>(cacheKey, out var cachedResult))
+        {
+            return cachedResult!;
         }
 
         var classificationPrompt = $$"""
@@ -86,6 +109,7 @@ public class ClassificationService
             var outputResult = _outputGuardrail.Validate(rawResponse);
             if (!outputResult.IsAllowed)
             {
+                _logger.LogWarning("Output guardrail blocked classify response for input: {InputHash}", inputHash);
                 return new ClassificationResult
                 {
                     Success = false,
@@ -97,6 +121,7 @@ public class ClassificationService
             // 3. Parsing
             if (!TryParseClassification(rawResponse, out var classification, out var error))
             {
+                _logger.LogWarning("Failed to parse classify response: {Error}", error);
                 return new ClassificationResult
                 {
                     Success = false,
@@ -105,15 +130,21 @@ public class ClassificationService
                 };
             }
 
-            return new ClassificationResult
+            var result = new ClassificationResult
             {
                 Success = true,
                 Classification = classification,
                 RawResponse = rawResponse
             };
+
+            _logger.LogInformation("Classification successful for input: {InputHash}. Category: {Category}", inputHash, classification.Category);
+            _cache.Set(cacheKey, result, TimeSpan.FromMinutes(30));
+
+            return result;
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Classification request failed for input: {InputHash}", inputHash);
             return new ClassificationResult
             {
                 Success = false,
